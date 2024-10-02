@@ -8,7 +8,7 @@ The charmed operator currently supports failure detection of nodes.
 ## Usage
 
 ```sh
-juju deploy ./consul-k8s_ubuntu-22.04-amd64.charm consul-server --trust --resource consul-image=docker.io/hashicorp/consul:1.19.2
+juju deploy ./consul-k8s_ubuntu-24.04-amd64.charm consul-server --trust --resource consul-image=docker.io/hashicorp/consul:1.19.2
 ```
 
 ## OCI Images
