@@ -1,0 +1,4 @@
+ops ~= 2.17
+lightkube
+lightkube-models
+pydantic

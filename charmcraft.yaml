@@ -1,0 +1,83 @@
+# Copyright 2024 Canonical Ltd.
+# See LICENSE file for licensing details.
+
+# This file configures Charmcraft.
+# See https://juju.is/docs/sdk/charmcraft-config for guidance.
+
+name: consul-k8s
+type: charm
+
+title: Consul K8s Operator
+summary: |
+  Charmed operator to run Consul on Kubernetes. 
+description: |
+  Charm based Consul operator to deploy and manage consul.
+
+website: https://charmhub.io/consul-k8s
+source: https://github.com/canonical/consul-k8s-operator
+issues: https://github.com/canonical/consul-k8s-operator/issues
+
+
+bases:
+  - build-on:
+    - name: ubuntu
+      channel: "22.04"
+    run-on:
+    - name: ubuntu
+      channel: "22.04"
+
+parts:
+  charm:
+    charm-binary-python-packages:
+      - pydantic
+
+assumes:
+  - juju >= 3.5
+  - k8s-api
+
+
+containers:
+  consul:
+    resource: consul-image
+    mounts:
+      - storage: data-dir
+        location: /consul/data
+
+resources:
+  consul-image:
+    type: oci-image
+    description: OCI image for consul container
+    upstream-source: docker.io/hashicorp/consul:1.19.2
+
+storage:
+  data-dir:
+    type: filesystem
+
+provides:
+  consul-cluster:
+    interface: consul-cluster
+
+
+config:
+  options:
+    datacenter:
+      description: |
+        Name of the datacenter consul agent is running on.
+      type: string
+      default: dc1
+    expose-gossip-and-rpc-ports:
+      description: |
+        Exposes the server gossip port as  node ports.
+        Used for exposing consul-server on k8s to agents running
+        on external VMs.
+        Exposing RPC ports is not supported.
+      type: boolean
+      default: False
+    serflan-node-port:
+      description: |
+        Serflan port number to expose as node port.
+        This port is used only when expose-gossip-and-rpc-ports
+        is set to True.
+        The range of valid ports is 30000-32767
+      type: int
+      default: 30401
