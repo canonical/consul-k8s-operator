@@ -19,7 +19,7 @@ not yet supported.
 import json
 import logging
 
-from charms.consul_k8s.v0.consul_cluster import ConsulConfigProvider
+from charms.consul_k8s.v0.consul_cluster import ConsulServiceProvider
 from charms.observability_libs.v1.kubernetes_service_patch import KubernetesServicePatch
 from lightkube import Client
 from lightkube.models.core_v1 import ServicePort
@@ -44,13 +44,13 @@ class ConsulCharm(CharmBase):
         self.name = "consul"
         self.ports: Ports = self.get_consul_ports()
 
-        self.consul = ConsulConfigProvider(charm=self)
+        self.consul = ConsulServiceProvider(charm=self)
         self.service_patch = self.open_ports()
 
         self.framework.observe(self.on.consul_pebble_ready, self._on_consul_pebble_ready)
         self.framework.observe(self.on.config_changed, self._on_config_changed)
         self.framework.observe(self.on.upgrade_charm, self._on_upgrade)
-        self.framework.observe(self.consul.on.config_request, self._on_config_request)
+        self.framework.observe(self.consul.on.endpoints_request, self._on_endpoints_request)
 
     def get_consul_ports(self) -> Ports:
         """Return consul ports with supported values."""
@@ -94,6 +94,7 @@ class ConsulCharm(CharmBase):
             )
             return
 
+        # TODO: Expose RPC ports and see how cluster agent clients can use that port
         node_ports = [
             ServicePort(
                 self.ports.serf_lan,
@@ -129,14 +130,15 @@ class ConsulCharm(CharmBase):
         self._configure()
 
     def _on_config_changed(self, _):
+        # TODO: Validate if serflan-node-port is in range 30000-32767
         self._configure()
 
     def _on_upgrade(self, _):
         self._configure()
 
-    def _on_config_request(self, event: RelationEvent):
-        """Send cluster config to consul client."""
-        self._set_config_on_related_apps(event)
+    def _on_endpoints_request(self, event: RelationEvent):
+        """Send cluster endpoints to consul client."""
+        self._set_endpoints_on_related_apps(event)
 
     def _update_status(self, status):
         if self.unit.is_leader():
@@ -163,13 +165,13 @@ class ConsulCharm(CharmBase):
                 return
 
         # Send updates on cluster join addresses/datacenter to all related apps.
-        self._set_config_on_related_apps()
+        self._set_endpoints_on_related_apps()
         self._update_status(ActiveStatus())
 
     def _update_consul_config(self) -> bool:
         datacenter: str = self.config.get("datacenter")  # pyright: ignore
         number_of_units = self.model.app.planned_units()
-        join_addresses = self._get_join_addesses()
+        join_addresses = self._get_internal_join_addresses()
         consul_config = ConsulConfigBuilder(
             self.ports, datacenter, number_of_units, join_addresses
         ).build()
@@ -177,7 +179,7 @@ class ConsulCharm(CharmBase):
         if self._running_consul_config == consul_config:
             return False
 
-        self.workload.push(CONSUL_CONFIG_PATH, json.dumps(consul_config), make_dirs=True)
+        self.workload.push(CONSUL_CONFIG_PATH, json.dumps(consul_config, indent=2), make_dirs=True)
         logger.info("Consul configuration file updated")
         return True
 
@@ -204,42 +206,67 @@ class ConsulCharm(CharmBase):
         logger.debug("Consul pods are running on Host IPs: {hostips}")
         return hostips
 
-    def _get_join_addesses(self, internal_use: bool = True) -> list[str]:
+    def _get_internal_join_addresses(self) -> list[str]:
         """Get consul server join addresses.
 
-        If the consul agents are within k8s cluster, internal_use should be
-        set to true. In this case internal service dns name with configured
-        serf lan port will be returned.
-        If the consul agents are external to k8s cluster, check if config
-        expose-gossip-and-rpc-ports is set to True. If the config is true,
-        return Host IPs and serf lan port.
+        If the consul agents are within k8s cluster, internal service dns
+        name with configured serf lan port will be returned.
+        Return type is list of string as this may change in future to
+        return Pod IP addresses instead of cluster ip.
 
         Return value should be in format [<IP/dns name>:<Port>, ...]
         """
-        if self.config.get("expose-gossip-and-rpc-ports") and not internal_use:
+        # Return ClusterIP dns service name
+        return [f"{self.model.app.name}.{self.model.name}.svc:{self.ports.serf_lan}"]
+
+    def _get_external_join_addresses(self) -> list[str] | None:
+        """Get consul server join addresses exposed at node level.
+
+        Return Host IPs and serf lan port if expose-gossip-and-rpc-ports
+        is set to True.
+
+        Return value should be in format [<IP/dns name>:<Port>, ...]
+        """
+        if self.config.get("expose-gossip-and-rpc-ports"):
             ip_addresses = self._get_hostips_for_consul_service(
                 self.model.app.name, self.model.name
             )
             return [f"{ip_address}:{self.ports.serf_lan}" for ip_address in ip_addresses]
 
+        return None
+
+    def _get_internal_http_endpoint(self) -> str:
         # Return ClusterIP dns service name
-        return [f"{self.model.app.name}.{self.model.name}.svc:{self.ports.serf_lan}"]
+        return f"{self.model.app.name}.{self.model.name}.svc:{self.ports.http}"
 
-    def _set_config_on_related_apps(self, event: RelationEvent | None = None):
-        """Send cluster config on all related apps.
+    def _get_exernal_http_endpoint(self) -> str | None:
+        # Placeholder to send ingress endpoint once ingress relation is implemented
+        return None
 
-        If event is None, the cluster config will be sent on all related apps.
+    def _set_endpoints_on_related_apps(self, event: RelationEvent | None = None):
+        """Send cluster endpoints on the related app.
+
+        If event is None, the cluster endpoints will be sent on all related apps.
         """
         # charm config have checks to determine if the value is string.
         # The config parameter also have default value and so datacenter
         # always return string, ignore the pyright static check.
         datacenter: str = self.config.get("datacenter")  # pyright: ignore
 
-        server_addresses = self._get_join_addesses(internal_use=False)
-        if event:
-            self.consul.set_cluster_config(event.relation, datacenter, server_addresses)
-        else:
-            self.consul.set_cluster_config(None, datacenter, server_addresses)
+        internal_join_addresses = self._get_internal_join_addresses()
+        external_join_addresses = self._get_external_join_addresses()
+        internal_http_endpoint = self._get_internal_http_endpoint()
+        external_http_endpoint = self._get_exernal_http_endpoint()
+
+        relation = event.relation if event else None
+        self.consul.set_cluster_endpoints(
+            relation,
+            datacenter,
+            internal_join_addresses,
+            external_join_addresses,
+            internal_http_endpoint,
+            external_http_endpoint,
+        )
 
     @property
     def _pebble_layer(self) -> Layer:

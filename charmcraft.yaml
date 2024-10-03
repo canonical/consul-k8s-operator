@@ -4,37 +4,29 @@
 # This file configures Charmcraft.
 # See https://juju.is/docs/sdk/charmcraft-config for guidance.
 
-name: consul-k8s
 type: charm
+name: consul-k8s
 
 title: Consul K8s Operator
-summary: |
-  Charmed operator to run Consul on Kubernetes. 
+summary: Operator to run Consul on Kubernetes. 
 description: |
-  Charm based Consul operator to deploy and manage consul.
-
-website: https://charmhub.io/consul-k8s
-source: https://github.com/canonical/consul-k8s-operator
-issues: https://github.com/canonical/consul-k8s-operator/issues
-
-
-bases:
-  - build-on:
-    - name: ubuntu
-      channel: "24.04"
-    run-on:
-    - name: ubuntu
-      channel: "24.04"
+  Kubernets based charm operator for Consul to deploy and manage consul
+  agent in server mode.
 
 parts:
   charm:
     charm-binary-python-packages:
       - pydantic
 
+base: ubuntu@24.04
+platforms:
+  amd64:
+    build-on: amd64
+    build-for: amd64
+
 assumes:
   - juju >= 3.5
   - k8s-api
-
 
 containers:
   consul:
@@ -43,20 +35,27 @@ containers:
       - storage: data-dir
         location: /consul/data
 
+provides:
+  consul-cluster:
+    interface: consul-cluster
+
 resources:
   consul-image:
     type: oci-image
     description: OCI image for consul container
-    upstream-source: docker.io/hashicorp/consul:1.19.2
+    upstream-source: ghcr.io/canonical/consul:1.19.2
 
 storage:
   data-dir:
     type: filesystem
 
-provides:
-  consul-cluster:
-    interface: consul-cluster
-
+links:
+  issues:
+  - https://github.com/canonical/consul-k8s-operator/issues
+  source:
+  - https://github.com/canonical/consul-k8s-operator
+  website:
+  - https://charmhub.io/consul-k8s
 
 config:
   options:

@@ -62,9 +62,13 @@ def test_all_relations(harness: Harness[ConsulCharm]):
     app_name = harness._backend.app_name
     datacenter = "test-dc"
     expected_join_addresses = [f"{app_name}.{model_name}.svc:8301"]
+    expected_http_address = f"{app_name}.{model_name}.svc:8500"
     expected_cluster_config = {
         "datacenter": datacenter,
-        "server_join_addresses": json.dumps(expected_join_addresses),
+        "internal_gossip_endpoints": json.dumps(expected_join_addresses),
+        "external_gossip_endpoints": json.dumps(None),
+        "internal_http_endpoint": json.dumps(expected_http_address),
+        "external_http_endpoint": json.dumps(None),
     }
 
     harness.set_model_name(model_name)
@@ -77,6 +81,8 @@ def test_all_relations(harness: Harness[ConsulCharm]):
     assert harness.model.unit.status == ActiveStatus()
 
     actual_cluster_config = harness.get_relation_data(rel_id, app_name)
+    print(actual_cluster_config)
+    print(expected_cluster_config)
     assert actual_cluster_config == expected_cluster_config
 
 
@@ -87,15 +93,20 @@ def test_cluster_config_relation_with_exposed_ports(
     model_name = "test-model"
     app_name = harness._backend.app_name
     datacenter = "test-dc"
-    seflan_node_port = 30501
+    serflan_node_port = 30501
     host_ip = "10.10.0.10"
 
     p = Pod(status=PodStatus(hostIP=host_ip))
     k8s_client().list.return_value = [p]
-    expected_join_addresses = [f"{host_ip}:{seflan_node_port}"]
+    expected_external_join_addresses = [f"{host_ip}:{serflan_node_port}"]
+    expected_internal_join_addresses = [f"{app_name}.{model_name}.svc:{serflan_node_port}"]
+    expected_http_address = f"{app_name}.{model_name}.svc:8500"
     expected_cluster_config = {
         "datacenter": datacenter,
-        "server_join_addresses": json.dumps(expected_join_addresses),
+        "internal_gossip_endpoints": json.dumps(expected_internal_join_addresses),
+        "external_gossip_endpoints": json.dumps(expected_external_join_addresses),
+        "internal_http_endpoint": json.dumps(expected_http_address),
+        "external_http_endpoint": json.dumps(None),
     }
 
     harness.set_model_name(model_name)
@@ -103,7 +114,7 @@ def test_cluster_config_relation_with_exposed_ports(
         {
             "datacenter": datacenter,
             "expose-gossip-and-rpc-ports": True,
-            "serflan-node-port": seflan_node_port,
+            "serflan-node-port": serflan_node_port,
         }
     )
     rel_id = harness.add_relation(DEFAULT_RELATION_NAME, "consul-client", app_data={})
