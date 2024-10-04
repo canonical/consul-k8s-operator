@@ -25,7 +25,6 @@ platforms:
     build-for: amd64
 
 assumes:
-  - juju >= 3.5
   - k8s-api
 
 containers:
