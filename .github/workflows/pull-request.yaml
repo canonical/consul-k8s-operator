@@ -12,3 +12,22 @@ jobs:
     secrets: inherit
     with:
       charm-path: "charm"
+
+  # charm-pull-request runs unit tests on python 3.8
+  # Workaround to run unit-tests in python 3.10
+  unit-tests:
+    name: Unit tests (python 3.10)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Set up python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install dependencies
+        run: python -m pip install tox
+      - name: Run tests
+        run: cd charm && tox -e unit
