@@ -81,8 +81,6 @@ def test_all_relations(harness: Harness[ConsulCharm]):
     assert harness.model.unit.status == ActiveStatus()
 
     actual_cluster_config = harness.get_relation_data(rel_id, app_name)
-    print(actual_cluster_config)
-    print(expected_cluster_config)
     assert actual_cluster_config == expected_cluster_config
 
 
