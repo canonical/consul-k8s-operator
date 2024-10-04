@@ -14,6 +14,7 @@ Supported features: Failure detection of nodes in
 the cluster.
 Service mesh, service discovery, and configuration are
 not yet supported.
+TLS is not yet supported.
 """
 
 import json
