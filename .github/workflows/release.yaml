@@ -19,7 +19,7 @@ jobs:
       charm-path: charm/
       provider: microk8s
       ip-range: 10.20.20.100-10.20.20.110
-      charmcraft-channel: 3/stable
+      charmcraft-channel: 3.x/stable
   release-charm:
     name: Release Charm and Libraries
     needs:
@@ -43,7 +43,7 @@ jobs:
       - name: Release libraries
         run: |
           # Install Charmcraft
-          sudo snap install charmcraft --classic --channel 3/stable
+          sudo snap install charmcraft --classic --channel 3.x/stable
           cd $GITHUB_WORKSPACE/charm
           # Get the charm name
           charm_name=$((yq .name metadata.yaml 2>/dev/null || yq .name charmcraft.yaml) | tr - _)
