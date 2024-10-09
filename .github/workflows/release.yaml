@@ -1,13 +1,58 @@
 name: Release Charm to Edge and Publish Libraries
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
 
+concurrency:
+  group: release
+  cancel-in-progress: true
+
 jobs:
-  release:
-    uses: canonical/observability/.github/workflows/charm-release.yaml@main
+  quality-checks:
+    name: Quality Checks
+    uses: canonical/observability/.github/workflows/_charm-quality-checks.yaml@main
     secrets: inherit
     with:
-      charm-path: "charm"
+      charm-path: charm/
+      provider: microk8s
+      ip-range: 10.20.20.100-10.20.20.110
+      charmcraft-channel: 3/stable
+  release-charm:
+    name: Release Charm and Libraries
+    needs:
+      - quality-checks
+    uses: canonical/observability/.github/workflows/_charm-release.yaml@main
+    secrets: inherit
+    with:
+      charm-path: charm/
+  release-libs:
+    name: Release any bumped charm library
+    needs:
+      - quality-checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          path: charm
+
+      - name: Release libraries
+        run: |
+          # Install Charmcraft
+          sudo snap install charmcraft --classic --channel 3/stable
+          cd $GITHUB_WORKSPACE/charm
+          # Get the charm name
+          charm_name=$((yq .name metadata.yaml 2>/dev/null || yq .name charmcraft.yaml) | tr - _)
+          if [[ $charm_name = "" ]]; then echo "Error: can't extract the charm name." && exit 1; fi
+          # For each library belonging to the charm, publish it
+          if [ -d lib/charms/$charm_name ]; then
+            for lib in $(find lib/charms/$charm_name -type f | sed 's|lib/||' | sed 's/.py//' | sed 's|/|.|g'); do
+              charmcraft publish-lib $lib
+            done
+          fi
+        env:
+          CHARMCRAFT_AUTH: "${{ secrets.CHARMHUB_TOKEN }}"
