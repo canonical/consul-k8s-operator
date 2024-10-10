@@ -44,7 +44,7 @@ jobs:
         run: |
           # Install Charmcraft
           sudo snap install charmcraft --classic --channel 3.x/stable
-          cd $GITHUB_WORKSPACE/charm
+          cd $GITHUB_WORKSPACE/charm/charm
           # Get the charm name
           charm_name=$((yq .name metadata.yaml 2>/dev/null || yq .name charmcraft.yaml) | tr - _)
           if [[ $charm_name = "" ]]; then echo "Error: can't extract the charm name." && exit 1; fi
