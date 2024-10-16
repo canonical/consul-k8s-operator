@@ -68,6 +68,15 @@ class ConsulConfigBuilder:
             },
             "retry_join": self.retry_join,
             "server": True,
+            "tls": {
+                "defaults": {
+                    "verify_incoming": True,
+                    "verify_outgoing": True,
+                    "ca_file": "/consul/config/certs/consul-agent-ca.pem",
+                    "cert_file": "/consul/config/certs/dc1-server-consul-0.pem",
+                    "key_file": "/consul/config/certs/dc1-server-consul-0-key.pem"
+                },
+            },
             # UI not enabled
             "ui_config": {"enabled": False},
         }
