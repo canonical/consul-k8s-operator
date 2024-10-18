@@ -18,14 +18,24 @@ not yet supported.
 
 import json
 import logging
+from typing import Union
 
 from charms.consul_k8s.v0.consul_cluster import ConsulServiceProvider
 from charms.observability_libs.v1.kubernetes_service_patch import KubernetesServicePatch
+from charms.tls_certificates_interface.v3.tls_certificates import (
+    AllCertificatesInvalidatedEvent,
+    CertificateAvailableEvent,
+    CertificateExpiringEvent,
+    CertificateInvalidatedEvent,
+    TLSCertificatesRequiresV3,
+    generate_csr,
+    generate_private_key,
+)
 from lightkube import Client
 from lightkube.models.core_v1 import ServicePort
 from lightkube.resources.core_v1 import Pod
 from ops import main
-from ops.charm import CharmBase, RelationEvent
+from ops.charm import CharmBase, RelationCreatedEvent, RelationEvent
 from ops.model import ActiveStatus, BlockedStatus, Port, WaitingStatus
 from ops.pebble import ChangeError, Error, Layer
 
@@ -51,6 +61,25 @@ class ConsulCharm(CharmBase):
         self.framework.observe(self.on.config_changed, self._on_config_changed)
         self.framework.observe(self.on.upgrade_charm, self._on_upgrade)
         self.framework.observe(self.consul.on.endpoints_request, self._on_endpoints_request)
+
+        self.certificates = TLSCertificatesRequiresV3(self, "certificates")
+        self.framework.observe(self.on.install, self._on_install)
+        self.framework.observe(
+            self.on.certificates_relation_created, self._on_certificates_relation_created
+        )
+        self.framework.observe(
+            self.certificates.on.certificate_available, self._on_certificate_available
+        )
+        self.framework.observe(
+            self.certificates.on.certificate_expiring, self._on_certificate_expiring
+        )
+        self.framework.observe(
+            self.certificates.on.certificate_invalidated, self._on_certificate_invalidated
+        )
+        self.framework.observe(
+            self.certificates.on.all_certificates_invalidated,
+            self._on_all_certificates_invalidated,
+        )
 
     def get_consul_ports(self) -> Ports:
         """Return consul ports with supported values."""
@@ -172,8 +201,13 @@ class ConsulCharm(CharmBase):
         datacenter: str = self.config.get("datacenter")  # pyright: ignore
         number_of_units = self.model.app.planned_units()
         join_addresses = self._get_internal_join_addresses()
+        tls_certificates = {
+            "ca_certificate_path": "/consul/config/certs/ca.pem",
+            "server_certificate_path": "/consul/config/certs/server-cert.pem",
+            "server_key_path": "/consul/config/certs/server-key.pem",
+        }
         consul_config = ConsulConfigBuilder(
-            self.ports, datacenter, number_of_units, join_addresses
+            self.ports, datacenter, number_of_units, join_addresses, tls_certificates
         ).build()
 
         if self._running_consul_config == consul_config:
@@ -267,6 +301,112 @@ class ConsulCharm(CharmBase):
             internal_http_endpoint,
             external_http_endpoint,
         )
+
+    def _on_install(self, event) -> None:
+        private_key_password = b"banana"  # What do we want to set this to?
+        private_key = generate_private_key(password=private_key_password)
+        certificates_relation = self.model.get_relation("certificates")
+        if not certificates_relation:
+            self.unit.status = WaitingStatus("Waiting for peer relation to be created")
+            event.defer()
+            return
+        certificates_relation.data[self.app].update(
+            {"private_key_password": "banana", "private_key": private_key.decode()}
+        )
+
+    def _on_certificates_relation_created(self, event: RelationCreatedEvent) -> None:
+        """Handle the creation of the TLS certificates relation."""
+        certificates_relation = self.model.get_relation("certificates")
+        if not certificates_relation:
+            self.unit.status = WaitingStatus("Waiting for peer relation to be created")
+            event.defer()
+            return
+        private_key_password = certificates_relation.data[self.app].get("private_key_password")
+        private_key = certificates_relation.data[self.app].get("private_key")
+        csr = generate_csr(
+            private_key=private_key.encode(),
+            private_key_password=private_key_password.encode(),
+            subject=self.cert_subject,
+        )
+        certificates_relation.data[self.app].update({"csr": csr.decode()})
+        self.certificates.request_certificate_creation(certificate_signing_request=csr)
+
+    def _on_certificate_available(self, event: CertificateAvailableEvent) -> None:
+        certificates_relation = self.model.get_relation("certificates")
+        if not certificates_relation:
+            self.unit.status = WaitingStatus("Waiting for peer relation to be created")
+            event.defer()
+            return
+
+        cert_dir = "/consul/config/certs"
+        cert_file = f"{cert_dir}/server-cert.pem"
+        key_file = f"{cert_dir}/server-key.pem"
+        ca_file = f"{cert_dir}/ca.pem"
+
+        private_key = certificates_relation.data[self.app].get("private_key")
+
+        self.workload.push(cert_file, event.certificate, make_dirs=True)
+        self.workload.push(key_file, private_key, make_dirs=True)
+        self.workload.push(ca_file, event.ca, make_dirs=True)
+
+        self.unit.status = ActiveStatus()
+
+    def _on_certificate_expiring(
+        self, event: Union[CertificateExpiringEvent, CertificateInvalidatedEvent]
+    ) -> None:
+        certificates_relation = self.model.get_relation("certificates")
+        if not certificates_relation:
+            self.unit.status = WaitingStatus("Waiting for peer relation to be created")
+            event.defer()
+            return
+        old_csr = certificates_relation.data[self.app].get("csr")
+        private_key_password = certificates_relation.data[self.app].get("private_key_password")
+        private_key = certificates_relation.data[self.app].get("private_key")
+        new_csr = generate_csr(
+            private_key=private_key.encode(),
+            private_key_password=private_key_password.encode(),
+            subject=self.cert_subject,
+        )
+        self.certificates.request_certificate_renewal(
+            old_certificate_signing_request=old_csr,
+            new_certificate_signing_request=new_csr,
+        )
+        certificates_relation.data[self.app].update({"csr": new_csr.decode()})
+
+    def _certificate_revoked(self) -> None:
+        certificates_relation = self.model.get_relation("certificates")
+        old_csr = certificates_relation.data[self.app].get("csr")
+        private_key_password = certificates_relation.data[self.app].get("private_key_password")
+        private_key = certificates_relation.data[self.app].get("private_key")
+        new_csr = generate_csr(
+            private_key=private_key.encode(),
+            private_key_password=private_key_password.encode(),
+            subject=self.cert_subject,
+        )
+        self.certificates.request_certificate_renewal(
+            old_certificate_signing_request=old_csr,
+            new_certificate_signing_request=new_csr,
+        )
+        certificates_relation.data[self.app].update({"csr": new_csr.decode()})
+        certificates_relation.data[self.app].pop("certificate")
+        certificates_relation.data[self.app].pop("ca")
+        certificates_relation.data[self.app].pop("chain")
+        self.unit.status = WaitingStatus("Waiting for new certificate")
+
+    def _on_certificate_invalidated(self, event: CertificateInvalidatedEvent) -> None:
+        certificates_relation = self.model.get_relation("certificates")
+        if not certificates_relation:
+            self.unit.status = WaitingStatus("Waiting for peer relation to be created")
+            event.defer()
+            return
+        if event.reason == "revoked":
+            self._certificate_revoked()
+        if event.reason == "expired":
+            self._on_certificate_expiring(event)
+
+    def _on_all_certificates_invalidated(self, event: AllCertificatesInvalidatedEvent) -> None:
+        # Do what you want with this information, probably remove all certificates.
+        pass
 
     @property
     def _pebble_layer(self) -> Layer:
