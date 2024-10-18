@@ -35,11 +35,13 @@ class ConsulConfigBuilder:
         datacenter: str,
         number_of_units: int,
         retry_join_addresses: list[str],
+        tls_certificates: dict = None,
     ):
         self.ports = ports
         self.datacenter = datacenter
         self.number_of_units = number_of_units
         self.retry_join = retry_join_addresses
+        self.tls_certificates = tls_certificates or {}
 
     def build(self) -> dict:
         """Build consul config file.
@@ -72,9 +74,18 @@ class ConsulConfigBuilder:
                 "defaults": {
                     "verify_incoming": True,
                     "verify_outgoing": True,
-                    "ca_file": "/consul/config/certs/consul-agent-ca.pem",
-                    "cert_file": "/consul/config/certs/dc1-server-consul-0.pem",
-                    "key_file": "/consul/config/certs/dc1-server-consul-0-key.pem"
+                    "ca_file": self.tls_certificates.get(
+                        "ca_certificate_path",
+                        "/consul/config/certs/ca.pem",
+                    ),
+                    "cert_file": self.tls_certificates.get(
+                        "server_certificate_path",
+                        "/consul/config/certs/server-cert.pem",
+                    ),
+                    "key_file": self.tls_certificates.get(
+                        "server_key_path",
+                        "/consul/config/certs/server-key.pem",
+                    ),
                 },
             },
             # UI not enabled

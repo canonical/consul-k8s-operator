@@ -8,7 +8,7 @@ type: charm
 name: consul-k8s
 
 title: Consul K8s Operator
-summary: Operator to run Consul on Kubernetes. 
+summary: Operator to run Consul on Kubernetes.
 description: |
   Kubernets based charm operator for Consul to deploy and manage consul
   agent in server mode.
@@ -17,6 +17,11 @@ parts:
   charm:
     charm-binary-python-packages:
       - pydantic
+    build-packages:
+      - libffi-dev
+      - libssl-dev
+      - rustc
+      - cargo
 
 base: ubuntu@24.04
 platforms:
@@ -34,6 +39,11 @@ containers:
       - storage: data-dir
         location: /consul/data
 
+requires:
+  certificates:
+    interface: tls-certificates
+    optional: true
+
 provides:
   consul-cluster:
     interface: consul-cluster
@@ -50,11 +60,11 @@ storage:
 
 links:
   issues:
-  - https://github.com/canonical/consul-k8s-operator/issues
+    - https://github.com/canonical/consul-k8s-operator/issues
   source:
-  - https://github.com/canonical/consul-k8s-operator
+    - https://github.com/canonical/consul-k8s-operator
   website:
-  - https://charmhub.io/consul-k8s
+    - https://charmhub.io/consul-k8s
 
 config:
   options:
