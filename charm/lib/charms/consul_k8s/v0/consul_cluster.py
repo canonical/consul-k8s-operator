@@ -77,7 +77,7 @@ LIBAPI = 0
 
 # Increment this PATCH version before using `charmcraft publish-lib` or reset
 # to 0 if you are raising the major API version
-LIBPATCH = 1
+LIBPATCH = 2
 
 DEFAULT_RELATION_NAME = "consul-cluster"
 
@@ -90,10 +90,10 @@ class ConsulServiceProviderAppData(BaseModel):
     datacenter: str = Field("Datacenter cluster name")
 
     # All endpoints are json serialized
-    internal_gossip_endpoints: list[str] | None = Field(
+    internal_gossip_endpoints: list[str] | None = Field(  # pyright: ignore
         "Consul server join addresses for internal consul agents"
     )
-    external_gossip_endpoints: list[str] | None = Field(
+    external_gossip_endpoints: list[str] | None = Field(  # pyright: ignore
         "Consul server join addresses for external consul agents"
     )
     internal_http_endpoint: str | None = Field(
@@ -293,13 +293,12 @@ class ConsulServiceProvider(Object):
 
         if relation is None:
             logging.debug(
-                "Sending endpoints to all related applications of relation" f"{self.relation_name}"
+                f"Sending endpoints to all related applications of relation{self.relation_name}"
             )
             relations_to_send_endpoints = self.framework.model.relations[self.relation_name]
         else:
             logging.debug(
-                f"Sending endpoints on relation {relation.app.name} "
-                f"{relation.name}/{relation.id}"
+                f"Sending endpoints on relation {relation.app.name} {relation.name}/{relation.id}"
             )
             relations_to_send_endpoints = [relation]
 

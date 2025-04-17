@@ -10,7 +10,7 @@ name: consul-k8s
 title: Consul K8s Operator
 summary: Operator to run Consul on Kubernetes. 
 description: |
-  Kubernets based charm operator for Consul to deploy and manage consul
+  Kubernetes based charm operator for Consul to deploy and manage consul
   agent in server mode.
 
 parts:
