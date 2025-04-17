@@ -8,7 +8,7 @@ on:
 jobs:
   pull-request:
     name: PR
-    uses: canonical/observability/.github/workflows/charm-pull-request.yaml@main
+    uses: canonical/observability/.github/workflows/charm-pull-request.yaml@v0
     secrets: inherit
     with:
       charm-path: "charm"
@@ -33,3 +33,18 @@ jobs:
         run: python -m pip install tox
       - name: Run tests
         run: cd charm && tox -e unit-tests
+
+  static-analysis:
+    name: Static analysis (lib and charm - python 3.12)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install dependencies
+        run: python -m pip install tox
+      - name: Static analysis
+        run: |
+          cd charm
+          tox -vve static-lib-py3
+          tox -vve static-charm-py3
+
