@@ -1,4 +1,5 @@
 ops ~= 2.17
 lightkube
 lightkube-models
+lightkube-extensions@git+https://github.com/canonical/lightkube-extensions.git
 pydantic

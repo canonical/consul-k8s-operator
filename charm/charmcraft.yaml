@@ -15,6 +15,8 @@ description: |
 
 parts:
   charm:
+    build-packages:
+      - git
     charm-binary-python-packages:
       - pydantic
 
@@ -79,3 +81,11 @@ config:
         The range of valid ports is 30000-32767
       type: int
       default: 30401
+    expose-gossip-port-as-loadbalancer:
+      description: |
+        If set to true, a LoadBalancer service will be created to expose
+        gossip port externally.
+        This is useful for the external consul agents (client agents) to
+        perform health checks on the consul servers.
+      type: boolean
+      default: False

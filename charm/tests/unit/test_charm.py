@@ -29,8 +29,8 @@ def k8s_client():
 
 
 @pytest.fixture()
-def kubernetes_service_patch():
-    with patch("charm.KubernetesServicePatch") as p:
+def kubernetes_service_handler():
+    with patch("charm.KubernetesServiceHandler") as p:
         yield p
 
 
@@ -43,7 +43,7 @@ def test_pebble_ready(harness: Harness[ConsulCharm]):
 
 
 def test_pebble_ready_with_configs(
-    harness: Harness[ConsulCharm], k8s_client, kubernetes_service_patch
+    harness: Harness[ConsulCharm], k8s_client, kubernetes_service_handler
 ):
     """Simulate container coming up with configs changed."""
     harness.update_config({"expose-gossip-and-rpc-ports": True, "serflan-node-port": 30501})
@@ -85,7 +85,7 @@ def test_all_relations(harness: Harness[ConsulCharm]):
 
 
 def test_cluster_config_relation_with_exposed_ports(
-    harness: Harness[ConsulCharm], k8s_client, kubernetes_service_patch
+    harness: Harness[ConsulCharm], k8s_client, kubernetes_service_handler
 ):
     """Test all relations."""
     model_name = "test-model"

@@ -20,7 +20,6 @@ import json
 import logging
 
 from charms.consul_k8s.v0.consul_cluster import ConsulServiceProvider
-from charms.observability_libs.v1.kubernetes_service_patch import KubernetesServicePatch
 from lightkube import Client
 from lightkube.models.core_v1 import ServicePort
 from lightkube.resources.core_v1 import Pod
@@ -30,6 +29,7 @@ from ops.model import ActiveStatus, BlockedStatus, Port, WaitingStatus
 from ops.pebble import ChangeError, Error, Layer
 
 from config_builder import ConsulConfigBuilder, Ports
+from k8s_resource_handlers import KubernetesServiceHandler, ServiceType
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,10 @@ class ConsulCharm(CharmBase):
         self.ports: Ports = self.get_consul_ports()
 
         self.consul = ConsulServiceProvider(charm=self)
-        self.service_patch = self.open_ports()
+        # If the return value of open_ports is not assigned, then the object
+        # KubernetesServiceHandler may get garbage collected and the service
+        # may get deleted. So, assign it to an instance variable.
+        self.k8s_service_handler = self.open_ports()
 
         self.framework.observe(self.on.consul_pebble_ready, self._on_consul_pebble_ready)
         self.framework.observe(self.on.config_changed, self._on_config_changed)
@@ -74,12 +77,12 @@ class ConsulCharm(CharmBase):
 
         return Ports(**ports)
 
-    def open_ports(self) -> KubernetesServicePatch | None:
+    def open_ports(self) -> KubernetesServiceHandler | None:
         """Open necessary service ports.
 
         If config expose-gossip-and-rpc-ports is not set, expose
         ports as Cluster Service ports.
-        Otherwise, expose ports as Node ports using KubernetesServicePatch
+        Otherwise, expose ports as Node ports using KubernetesServiceHandler
         and return the object.
 
         Ports that are opened: serf_lan tcp/udp, http.
@@ -93,6 +96,11 @@ class ConsulCharm(CharmBase):
                 Port("tcp", self.ports.http),
             )
             return
+
+        if self.config.get("expose-gossip-port-as-loadbalancer"):
+            service_type = ServiceType.LoadBalancer
+        else:
+            service_type = ServiceType.NodePort
 
         # TODO: Expose RPC ports and see how cluster agent clients can use that port
         node_ports = [
@@ -116,14 +124,12 @@ class ConsulCharm(CharmBase):
             ),
         ]
 
-        # TODO: Can we change externaltrafficpolicy, internaltrafficpolicy? need change in lib
-        logger.info(f"Creating service ports as NodePort: {node_ports}")
-        return KubernetesServicePatch(
+        logger.info(f"Creating service ports as {service_type.value}: {node_ports}")
+        return KubernetesServiceHandler(
             self,
             node_ports,
-            service_name=f"{self.model.app.name}",
-            service_type="NodePort",  # type: ignore NodePort should be added in KuberenetesServicePatch library ServiceType
-            refresh_event=self.on.config_changed,
+            service_type=service_type,
+            refresh_event=[self.on.config_changed],
         )
 
     def _on_consul_pebble_ready(self, _):
