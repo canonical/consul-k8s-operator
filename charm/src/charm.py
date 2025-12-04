@@ -20,7 +20,6 @@ import json
 import logging
 
 from charms.consul_k8s.v0.consul_cluster import ConsulServiceProvider
-from charms.observability_libs.v1.kubernetes_service_patch import KubernetesServicePatch
 from lightkube import Client
 from lightkube.models.core_v1 import ServicePort
 from lightkube.resources.core_v1 import Pod
@@ -30,6 +29,7 @@ from ops.model import ActiveStatus, BlockedStatus, Port, WaitingStatus
 from ops.pebble import ChangeError, Error, Layer
 
 from config_builder import ConsulConfigBuilder, Ports
+from k8s_resource_handlers import KubernetesServiceHandler, ServiceType
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,10 @@ class ConsulCharm(CharmBase):
         self.ports: Ports = self.get_consul_ports()
 
         self.consul = ConsulServiceProvider(charm=self)
-        self.service_patch = self.open_ports()
+        # If the return value of open_ports is not assigned, then the object
+        # KubernetesServiceHandler may get garbage collected and the service
+        # may get deleted. So, assign it to an instance variable.
+        self.k8s_service_handler = self.open_ports()
 
         self.framework.observe(self.on.consul_pebble_ready, self._on_consul_pebble_ready)
         self.framework.observe(self.on.config_changed, self._on_config_changed)
@@ -69,22 +72,24 @@ class ConsulCharm(CharmBase):
             "expose_max_port": 0,  # Not supported
         }
 
-        if self.config.get("expose-gossip-and-rpc-ports"):
+        expose_config = self.config.get("expose-gossip-and-rpc-ports", "false")
+        if expose_config in ["nodeport", "loadbalancer"]:
             ports["serf_lan"] = self.config.get("serflan-node-port")  # pyright: ignore
 
         return Ports(**ports)
 
-    def open_ports(self) -> KubernetesServicePatch | None:
+    def open_ports(self) -> KubernetesServiceHandler | None:
         """Open necessary service ports.
 
-        If config expose-gossip-and-rpc-ports is not set, expose
+        If config expose-gossip-and-rpc-ports is 'false', expose
         ports as Cluster Service ports.
-        Otherwise, expose ports as Node ports using KubernetesServicePatch
-        and return the object.
+        If 'nodeport', expose as NodePort service.
+        If 'loadbalancer', expose as LoadBalancer service.
 
         Ports that are opened: serf_lan tcp/udp, http.
         """
-        if not self.config.get("expose-gossip-and-rpc-ports"):
+        expose_config = self.config.get("expose-gossip-and-rpc-ports", "false")
+        if expose_config == "false":
             # Expose as ClusterService
             logger.info("Creating service ports as ClusterIP")
             self.unit.set_ports(
@@ -92,6 +97,13 @@ class ConsulCharm(CharmBase):
                 Port("udp", self.ports.serf_lan),
                 Port("tcp", self.ports.http),
             )
+            return
+        elif expose_config == "loadbalancer":
+            service_type = ServiceType.LoadBalancer
+        elif expose_config == "nodeport":
+            service_type = ServiceType.NodePort
+        else:
+            logger.warning(f"Invalid expose-gossip-and-rpc-ports value: {expose_config}")
             return
 
         # TODO: Expose RPC ports and see how cluster agent clients can use that port
@@ -116,21 +128,47 @@ class ConsulCharm(CharmBase):
             ),
         ]
 
-        # TODO: Can we change externaltrafficpolicy, internaltrafficpolicy? need change in lib
-        logger.info(f"Creating service ports as NodePort: {node_ports}")
-        return KubernetesServicePatch(
+        logger.info(f"Creating service ports as {service_type.value}: {node_ports}")
+        return KubernetesServiceHandler(
             self,
             node_ports,
-            service_name=f"{self.model.app.name}",
-            service_type="NodePort",  # type: ignore NodePort should be added in KuberenetesServicePatch library ServiceType
-            refresh_event=self.on.config_changed,
+            service_type=service_type,
+            refresh_event=[self.on.config_changed],
         )
 
     def _on_consul_pebble_ready(self, _):
         self._configure()
 
     def _on_config_changed(self, _):
-        # TODO: Validate if serflan-node-port is in range 30000-32767
+        # Validate expose-gossip-and-rpc-ports config value
+        expose_config = self.config.get("expose-gossip-and-rpc-ports", "false")
+        valid_values = ["false", "nodeport", "loadbalancer"]
+        if expose_config not in valid_values:
+            msg = (
+                f"Invalid value '{expose_config}' for expose-gossip-and-rpc-ports. "
+                f"Valid values are: {', '.join(valid_values)}"
+            )
+            self._update_status(BlockedStatus(msg))
+            logger.error(msg)
+            return
+
+        # Validate serflan-node-port is in valid NodePort range when expose is enabled
+        if expose_config in ["nodeport", "loadbalancer"]:
+            serflan_port = self.config.get("serflan-node-port")
+            if serflan_port is None or not isinstance(serflan_port, int):
+                msg = "serflan-node-port must be an integer"
+                self._update_status(BlockedStatus(msg))
+                logger.error(msg)
+                return
+            if not (30000 <= serflan_port <= 32767):
+                msg = (
+                    f"Invalid value '{serflan_port}' for serflan-node-port. "
+                    f"Valid range is 30000-32767"
+                )
+                self._update_status(BlockedStatus(msg))
+                logger.error(msg)
+                return
+
         self._configure()
 
     def _on_upgrade(self, _):
@@ -217,17 +255,22 @@ class ConsulCharm(CharmBase):
         Return value should be in format [<IP/dns name>:<Port>, ...]
         """
         # Return ClusterIP dns service name
-        return [f"{self.model.app.name}.{self.model.name}.svc:{self.ports.serf_lan}"]
+        if self.config.get("expose-gossip-and-rpc-ports", "false") == "false":
+            return [f"{self.model.app.name}.{self.model.name}.svc:{self.ports.serf_lan}"]
+
+        # Add suffix lb to service name for NodePort/LoadBalancer service
+        return [f"{self.model.app.name}-lb.{self.model.name}.svc:{self.ports.serf_lan}"]
 
     def _get_external_join_addresses(self) -> list[str] | None:
         """Get consul server join addresses exposed at node level.
 
         Return Host IPs and serf lan port if expose-gossip-and-rpc-ports
-        is set to True.
+        is set to 'nodeport' or 'loadbalancer'.
 
         Return value should be in format [<IP/dns name>:<Port>, ...]
         """
-        if self.config.get("expose-gossip-and-rpc-ports"):
+        expose_config = self.config.get("expose-gossip-and-rpc-ports", "false")
+        if expose_config in ["nodeport", "loadbalancer"]:
             ip_addresses = self._get_hostips_for_consul_service(
                 self.model.app.name, self.model.name
             )
@@ -237,10 +280,30 @@ class ConsulCharm(CharmBase):
 
     def _get_internal_http_endpoint(self) -> str:
         # Return ClusterIP dns service name
-        return f"{self.model.app.name}.{self.model.name}.svc:{self.ports.http}"
+        if self.config.get("expose-gossip-and-rpc-ports", "false") == "false":
+            return f"{self.model.app.name}.{self.model.name}.svc:{self.ports.http}"
+
+        return f"{self.model.app.name}-lb.{self.model.name}.svc:{self.ports.http}"
 
     def _get_exernal_http_endpoint(self) -> str | None:
         # Placeholder to send ingress endpoint once ingress relation is implemented
+        return None
+
+    def _get_external_gossip_healthcheck_endpoints(self) -> list[str] | None:
+        """Get consul server gossip healthcheck endpoints exposed at node level.
+
+        Return LoadBalancer IP and serf lan port if expose-gossip-and-rpc-ports
+        is set to 'loadbalancer' and LoadBalancer IP is available.
+
+        Return value should be in format [<IP/dns name>:<Port>, ...]
+        """
+        if not self.k8s_service_handler:
+            return None
+
+        lb_ip = self.k8s_service_handler.get_loadbalancer_ip()
+        if lb_ip:
+            return [f"{lb_ip}:{self.ports.serf_lan}"]
+
         return None
 
     def _set_endpoints_on_related_apps(self, event: RelationEvent | None = None):
@@ -257,6 +320,7 @@ class ConsulCharm(CharmBase):
         external_join_addresses = self._get_external_join_addresses()
         internal_http_endpoint = self._get_internal_http_endpoint()
         external_http_endpoint = self._get_exernal_http_endpoint()
+        external_gossip_healthcheck_endpoints = self._get_external_gossip_healthcheck_endpoints()
 
         relation = event.relation if event else None
         self.consul.set_cluster_endpoints(
@@ -266,6 +330,7 @@ class ConsulCharm(CharmBase):
             external_join_addresses,
             internal_http_endpoint,
             external_http_endpoint,
+            external_gossip_healthcheck_endpoints,
         )
 
     @property
