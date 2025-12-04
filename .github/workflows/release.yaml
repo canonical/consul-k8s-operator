@@ -13,6 +13,7 @@ jobs:
     secrets:
       CHARMHUB_TOKEN: ${{ secrets.CHARMHUB_TOKEN }}
     with:
+      charm-path: charm
       provider: microk8s
       default-track: "1.19"
       charmcraft-channel: "3.x/stable"
