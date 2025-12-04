@@ -31,8 +31,8 @@ This charm by default uses the latest version of the [canonical/consul](https://
 ## Configurations
 
 * `datacenter` allows user to set a datacenter name for the consul cluster.
-* `expose-gossip-and-rpc-ports` allows user to expose consul gossip ports over the node port so that consul agents external
-to kubernetes can be joined to the consul cluster.
+* `expose-gossip-and-rpc-ports` allows user to expose consul gossip ports over the node port or loadbalancer so that
+consul agents external to kubernetes can be joined to the consul cluster.
 * `serflan-node-port` allows user to set node port for gossip protocol communication.
 
 ## Relations
@@ -40,7 +40,8 @@ to kubernetes can be joined to the consul cluster.
 ### Providing Consul cluster config
 
 * `consul-cluster`: Provides cluster server endpoints to the related apps.
-  Serf/gossip and http internal/external endpoints are provided over relation data.
+  Serf/gossip, http internal/external endpoints and gossip healthcheck loadbalancer
+  endpoint are provided over relation data.
   This is useful for external consul clients to join the consul cluster.
 
 ## Contributing
