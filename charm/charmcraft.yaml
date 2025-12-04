@@ -86,6 +86,8 @@ config:
         If set to true, a LoadBalancer service will be created to expose
         gossip port externally.
         This is useful for the external consul agents (client agents) to
-        perform health checks on the consul servers.
+        perform tcp health check on the consul servers.
+        This option is ignored if expose-gossip-and-rpc-ports is set to
+        False.
       type: boolean
       default: False

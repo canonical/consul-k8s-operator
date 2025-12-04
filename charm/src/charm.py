@@ -249,6 +249,23 @@ class ConsulCharm(CharmBase):
         # Placeholder to send ingress endpoint once ingress relation is implemented
         return None
 
+    def _get_external_gossip_healthcheck_endpoints(self) -> list[str] | None:
+        """Get consul server gossip healthcheck endpoints exposed at node level.
+
+        Return Host IPs and serf lan port if expose-gossip-and-rpc-ports
+        is set to True.
+
+        Return value should be in format [<IP/dns name>:<Port>, ...]
+        """
+        if not self.k8s_service_handler:
+            return None
+
+        lb_ip = self.k8s_service_handler.get_loadbalancer_ip()
+        if lb_ip:
+            return [f"{lb_ip}:{self.ports.serf_lan}"]
+
+        return None
+
     def _set_endpoints_on_related_apps(self, event: RelationEvent | None = None):
         """Send cluster endpoints on the related app.
 
@@ -263,6 +280,7 @@ class ConsulCharm(CharmBase):
         external_join_addresses = self._get_external_join_addresses()
         internal_http_endpoint = self._get_internal_http_endpoint()
         external_http_endpoint = self._get_exernal_http_endpoint()
+        external_gossip_healthcheck_endpoints = self._get_external_gossip_healthcheck_endpoints()
 
         relation = event.relation if event else None
         self.consul.set_cluster_endpoints(
@@ -272,6 +290,7 @@ class ConsulCharm(CharmBase):
             external_join_addresses,
             internal_http_endpoint,
             external_http_endpoint,
+            external_gossip_healthcheck_endpoints,
         )
 
     @property

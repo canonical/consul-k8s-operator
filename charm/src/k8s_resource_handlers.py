@@ -58,7 +58,7 @@ class KubernetesServiceHandler(Object):
     """Manage Kubernetes services.
 
     Creates a new Kubernetes service of type NodePort or LoadBalancer
-    with name as {app.name}-external. Patch the service on
+    with name as {app.name}-lb. Patch the service on
     events defined by the charm.
     Remove the kubernetes service on removal of application
     or the last unit.
