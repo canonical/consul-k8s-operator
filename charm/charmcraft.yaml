@@ -67,12 +67,14 @@ config:
       default: dc1
     expose-gossip-and-rpc-ports:
       description: |
-        Exposes the server gossip port as  node ports.
+        Exposes the server gossip port externally using Kubernetes
+        NodePort or loadBalancer.
         Used for exposing consul-server on k8s to agents running
-        on external VMs.
+        on external VMs/machines.
+        Possible values: 'false', 'nodeport', 'loadbalancer'
         Exposing RPC ports is not supported.
-      type: boolean
-      default: False
+      type: string
+      default: "false"
     serflan-node-port:
       description: |
         Serflan port number to expose as node port.
@@ -81,13 +83,3 @@ config:
         The range of valid ports is 30000-32767
       type: int
       default: 30401
-    expose-gossip-port-as-loadbalancer:
-      description: |
-        If set to true, a LoadBalancer service will be created to expose
-        gossip port externally.
-        This is useful for the external consul agents (client agents) to
-        perform tcp health check on the consul servers.
-        This option is ignored if expose-gossip-and-rpc-ports is set to
-        False.
-      type: boolean
-      default: False

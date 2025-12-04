@@ -46,7 +46,7 @@ def test_pebble_ready_with_configs(
     harness: Harness[ConsulCharm], k8s_client, kubernetes_service_handler
 ):
     """Simulate container coming up with configs changed."""
-    harness.update_config({"expose-gossip-and-rpc-ports": True, "serflan-node-port": 30501})
+    harness.update_config({"expose-gossip-and-rpc-ports": "nodeport", "serflan-node-port": 30501})
     harness.begin_with_initial_hooks()
     harness.container_pebble_ready("consul")
 
@@ -102,8 +102,8 @@ def test_cluster_config_relation_with_exposed_ports(
     p = Pod(status=PodStatus(hostIP=host_ip))
     k8s_client().list.return_value = [p]
     expected_external_join_addresses = [f"{host_ip}:{serflan_node_port}"]
-    expected_internal_join_addresses = [f"{app_name}.{model_name}.svc:{serflan_node_port}"]
-    expected_http_address = f"{app_name}.{model_name}.svc:8500"
+    expected_internal_join_addresses = [f"{app_name}-lb.{model_name}.svc:{serflan_node_port}"]
+    expected_http_address = f"{app_name}-lb.{model_name}.svc:8500"
     expected_cluster_config = {
         "datacenter": datacenter,
         "internal_gossip_endpoints": json.dumps(expected_internal_join_addresses),
@@ -117,7 +117,7 @@ def test_cluster_config_relation_with_exposed_ports(
     harness.update_config(
         {
             "datacenter": datacenter,
-            "expose-gossip-and-rpc-ports": True,
+            "expose-gossip-and-rpc-ports": "nodeport",
             "serflan-node-port": serflan_node_port,
         }
     )
@@ -135,10 +135,10 @@ def test_cluster_config_relation_with_exposed_ports(
 def test_open_ports_with_nodeport_service(
     harness: Harness[ConsulCharm], kubernetes_service_handler
 ):
-    """Test that NodePort service is created when expose-gossip-and-rpc-ports is True."""
+    """Test that NodePort service is created when expose-gossip-and-rpc-ports is 'nodeport'."""
     from k8s_resource_handlers import ServiceType
 
-    harness.update_config({"expose-gossip-and-rpc-ports": True, "serflan-node-port": 30501})
+    harness.update_config({"expose-gossip-and-rpc-ports": "nodeport", "serflan-node-port": 30501})
     harness.begin()
 
     # Verify KubernetesServiceHandler was called with NodePort service type
@@ -150,13 +150,12 @@ def test_open_ports_with_nodeport_service(
 def test_open_ports_with_loadbalancer_service(
     harness: Harness[ConsulCharm], kubernetes_service_handler
 ):
-    """Test that LoadBalancer service is created when expose-gossip-port-as-loadbalancer is True."""
+    """Test that LoadBalancer service is created when expose-gossip-and-rpc-ports is 'loadbalancer'."""
     from k8s_resource_handlers import ServiceType
 
     harness.update_config(
         {
-            "expose-gossip-and-rpc-ports": True,
-            "expose-gossip-port-as-loadbalancer": True,
+            "expose-gossip-and-rpc-ports": "loadbalancer",
             "serflan-node-port": 30501,
         }
     )
@@ -169,8 +168,17 @@ def test_open_ports_with_loadbalancer_service(
 
 
 def test_open_ports_without_expose_returns_none(harness: Harness[ConsulCharm]):
-    """Test that no KubernetesServiceHandler is created when expose-gossip-and-rpc-ports is False."""
-    harness.update_config({"expose-gossip-and-rpc-ports": False})
+    """Test that no KubernetesServiceHandler is created when expose-gossip-and-rpc-ports is 'false'."""
+    harness.update_config({"expose-gossip-and-rpc-ports": "false"})
+    harness.begin()
+
+    # Verify that k8s_service_handler is None
+    assert harness.charm.k8s_service_handler is None
+
+
+def test_open_ports_with_invalid_value_returns_none(harness: Harness[ConsulCharm]):
+    """Test that no KubernetesServiceHandler is created when expose-gossip-and-rpc-ports has invalid value."""
+    harness.update_config({"expose-gossip-and-rpc-ports": "invalid"})
     harness.begin()
 
     # Verify that k8s_service_handler is None
@@ -181,7 +189,7 @@ def test_service_handler_instance_stored(
     harness: Harness[ConsulCharm], kubernetes_service_handler
 ):
     """Test that KubernetesServiceHandler instance is stored to prevent garbage collection."""
-    harness.update_config({"expose-gossip-and-rpc-ports": True, "serflan-node-port": 30501})
+    harness.update_config({"expose-gossip-and-rpc-ports": "nodeport", "serflan-node-port": 30501})
     harness.begin()
 
     # Verify that the handler instance is stored in the charm
@@ -191,7 +199,7 @@ def test_service_handler_instance_stored(
 
 def test_service_ports_configuration(harness: Harness[ConsulCharm], kubernetes_service_handler):
     """Test that service ports are correctly configured."""
-    harness.update_config({"expose-gossip-and-rpc-ports": True, "serflan-node-port": 30501})
+    harness.update_config({"expose-gossip-and-rpc-ports": "nodeport", "serflan-node-port": 30501})
     harness.begin()
 
     # Verify KubernetesServiceHandler was called with correct ports
@@ -239,10 +247,10 @@ def test_external_gossip_healthcheck_with_loadbalancer_ip(
     expected_cluster_config = {
         "datacenter": datacenter,
         "internal_gossip_endpoints": json.dumps(
-            [f"{app_name}.{model_name}.svc:{serflan_node_port}"]
+            [f"{app_name}-lb.{model_name}.svc:{serflan_node_port}"]
         ),
         "external_gossip_endpoints": json.dumps([f"10.10.0.10:{serflan_node_port}"]),
-        "internal_http_endpoint": json.dumps(f"{app_name}.{model_name}.svc:8500"),
+        "internal_http_endpoint": json.dumps(f"{app_name}-lb.{model_name}.svc:8500"),
         "external_http_endpoint": json.dumps(None),
         "external_gossip_healthcheck_endpoints": json.dumps(expected_healthcheck_endpoints),
     }
@@ -251,8 +259,7 @@ def test_external_gossip_healthcheck_with_loadbalancer_ip(
     harness.update_config(
         {
             "datacenter": datacenter,
-            "expose-gossip-and-rpc-ports": True,
-            "expose-gossip-port-as-loadbalancer": True,
+            "expose-gossip-and-rpc-ports": "loadbalancer",
             "serflan-node-port": serflan_node_port,
         }
     )
@@ -265,3 +272,103 @@ def test_external_gossip_healthcheck_with_loadbalancer_ip(
 
     actual_cluster_config = harness.get_relation_data(rel_id, app_name)
     assert actual_cluster_config == expected_cluster_config
+
+
+def test_config_changed_with_invalid_expose_value(
+    harness: Harness[ConsulCharm], kubernetes_service_handler
+):
+    """Test that invalid expose-gossip-and-rpc-ports value sets BlockedStatus."""
+    from ops.model import BlockedStatus
+
+    harness.begin()
+    harness.container_pebble_ready("consul")
+
+    # Update config with invalid value
+    harness.update_config({"expose-gossip-and-rpc-ports": "invalid-value"})
+
+    # Verify charm is in BlockedStatus with appropriate message
+    assert isinstance(harness.model.unit.status, BlockedStatus)
+    assert "Invalid value 'invalid-value' for expose-gossip-and-rpc-ports" in str(
+        harness.model.unit.status.message
+    )
+    assert "Valid values are: false, nodeport, loadbalancer" in str(
+        harness.model.unit.status.message
+    )
+
+
+def test_config_changed_with_serflan_port_too_low(
+    harness: Harness[ConsulCharm], kubernetes_service_handler
+):
+    """Test that serflan-node-port below 30000 sets BlockedStatus."""
+    from ops.model import BlockedStatus
+
+    harness.begin()
+    harness.container_pebble_ready("consul")
+
+    # Update config with port below valid range
+    harness.update_config({"expose-gossip-and-rpc-ports": "nodeport", "serflan-node-port": 29999})
+
+    # Verify charm is in BlockedStatus with appropriate message
+    assert isinstance(harness.model.unit.status, BlockedStatus)
+    assert "Invalid value '29999' for serflan-node-port" in str(harness.model.unit.status.message)
+    assert "Valid range is 30000-32767" in str(harness.model.unit.status.message)
+
+
+def test_config_changed_with_serflan_port_too_high(
+    harness: Harness[ConsulCharm], kubernetes_service_handler
+):
+    """Test that serflan-node-port above 32767 sets BlockedStatus."""
+    from ops.model import BlockedStatus
+
+    harness.begin()
+    harness.container_pebble_ready("consul")
+
+    # Update config with port above valid range
+    harness.update_config(
+        {"expose-gossip-and-rpc-ports": "loadbalancer", "serflan-node-port": 32768}
+    )
+
+    # Verify charm is in BlockedStatus with appropriate message
+    assert isinstance(harness.model.unit.status, BlockedStatus)
+    assert "Invalid value '32768' for serflan-node-port" in str(harness.model.unit.status.message)
+    assert "Valid range is 30000-32767" in str(harness.model.unit.status.message)
+
+
+def test_config_changed_with_valid_serflan_port_boundary_low(
+    harness: Harness[ConsulCharm], k8s_client, kubernetes_service_handler
+):
+    """Test that serflan-node-port at 30000 (lower boundary) is valid."""
+    from lightkube.models.core_v1 import Pod, PodStatus
+
+    p = Pod(status=PodStatus(hostIP="10.10.0.10"))
+    k8s_client().list.return_value = [p]
+
+    harness.begin()
+    harness.container_pebble_ready("consul")
+
+    # Update config with port at lower boundary
+    harness.update_config({"expose-gossip-and-rpc-ports": "nodeport", "serflan-node-port": 30000})
+
+    # Verify charm is in ActiveStatus
+    assert harness.model.unit.status == ActiveStatus()
+
+
+def test_config_changed_with_valid_serflan_port_boundary_high(
+    harness: Harness[ConsulCharm], k8s_client, kubernetes_service_handler
+):
+    """Test that serflan-node-port at 32767 (upper boundary) is valid."""
+    from lightkube.models.core_v1 import Pod, PodStatus
+
+    p = Pod(status=PodStatus(hostIP="10.10.0.10"))
+    k8s_client().list.return_value = [p]
+
+    harness.begin()
+    harness.container_pebble_ready("consul")
+
+    # Update config with port at upper boundary
+    harness.update_config(
+        {"expose-gossip-and-rpc-ports": "loadbalancer", "serflan-node-port": 32767}
+    )
+
+    # Verify charm is in ActiveStatus
+    assert harness.model.unit.status == ActiveStatus()
