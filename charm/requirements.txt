@@ -1,5 +1,6 @@
 ops ~= 2.17
-lightkube
+# lightkube-extensions imports the HTTPX transport used by Lightkube 0.x.
+lightkube<1
 lightkube-models
 lightkube-extensions@git+https://github.com/canonical/lightkube-extensions.git
 pydantic

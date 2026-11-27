@@ -15,16 +15,16 @@ description: |
 
 parts:
   charm:
+    plugin: uv
+    source: .
     build-packages:
       - git
-    charm-binary-python-packages:
-      - pydantic
+    build-snaps:
+      - astral-uv
 
-base: ubuntu@24.04
 platforms:
-  amd64:
-    build-on: amd64
-    build-for: amd64
+  ubuntu@24.04:amd64:
+  ubuntu@26.04:amd64:
 
 assumes:
   - k8s-api

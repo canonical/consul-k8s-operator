@@ -20,8 +20,10 @@ Planned features:
 
 ## Usage
 
+Select the charm artifact for Ubuntu 24.04 or 26.04. This example uses Ubuntu 24.04.
+
 ```sh
-juju deploy ./consul-k8s_amd64.charm consul-server --trust --resource consul-image=ghcr.io/canonical/consul:1.19.2
+juju deploy ./consul-k8s_ubuntu@24.04-amd64.charm consul-server --trust --resource consul-image=ghcr.io/canonical/consul:1.19.2
 ```
 
 ## OCI Images

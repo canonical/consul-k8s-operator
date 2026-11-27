@@ -9,9 +9,14 @@ jobs:
   pull-request:
     name: PR
     uses: canonical/observability/.github/workflows/charm-pull-request.yaml@v1
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
     secrets: inherit
     with:
       charm-path: "charm"
+      charmcraft-channel: "4.x/stable"
 
   # charm-pull-request runs unit tests on python 3.8
   # Workaround to run unit-tests in python 3.12

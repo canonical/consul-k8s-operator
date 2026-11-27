@@ -17,6 +17,7 @@ from k8s_resource_handlers import KubernetesServiceHandler, ServiceType
 @pytest.fixture()
 def harness():
     harness = Harness(ConsulCharm)
+    harness.set_model_name("consul-test")
     yield harness
     harness.cleanup()
 

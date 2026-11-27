@@ -1,6 +1,7 @@
 venv/
 build/
 *.charm
+.charmcraft_output_packages.txt
 .tox/
 .coverage
 __pycache__/
